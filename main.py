@@ -57,13 +57,13 @@ def main_kb(uid=None):
         ["📡 চ্যানেল সেটিংস"],
         ["🛡️ প্রাইভেসি ফিল্টার"],
         ["📝 অটো পোস্ট", "📊 পরিসংখ্যান"],
-        ["🤖 AI সেটিংস", "📩 User Messaging"],
-        ["📢 Channel → Group", "🧭 Multi-Channel Watch"],
+        ["🤖 AI সেটিংস", "📩 ইউজার মেসেজিং"],
+        ["📢 Channel → Group", "🧭 মাল্টি-চ্যানেল ওয়াচ"],
         ["⚙️ সেটিংস", "❓ সাহায্য"],
     ]
     # Feature 9 — Admin Management বাটন শুধু Super Owner-কে দেখানো হয়।
     if uid is not None and is_super_owner(uid):
-        rows.insert(-1, ["👑 Admin Management"])
+        rows.insert(-1, ["👑 অ্যাডমিন ব্যবস্থাপনা"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def channel_kb():
@@ -265,9 +265,9 @@ MENU_PERMISSION = {
     "🎨 Post Format Style": "ai_settings",
     "📚 Private Knowledge": "all_data_manage",
     "⚙️ সেটিংস": "bot_settings",
-    "📩 User Messaging": "user_account_control",
-    "🧭 Multi-Channel Watch": "channel_manage",
-    # "👑 Admin Management" is intentionally NOT here — it is gated by
+    "📩 ইউজার মেসেজিং": "user_account_control",
+    "🧭 মাল্টি-চ্যানেল ওয়াচ": "channel_manage",
+    # "👑 অ্যাডমিন ব্যবস্থাপনা" is intentionally NOT here — it is gated by
     # is_super_owner() directly below, never by a delegable permission.
 }
 
@@ -305,7 +305,7 @@ async def optin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if key not in campaign_ids:
         campaign_ids.append(key)
     save_settings(settings)
-    await update.message.reply_text("✅ আপনি opt-in করেছেন। এখন থেকে Admin-এর অনুমোদিত message পেতে পারেন।")
+    await update.message.reply_text("✅ আপনি opt-in করেছেন। এখন থেকে Admin যে message পাঠাবে, তা সরাসরি আপনি পাবেন।")
 
 
 async def optout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -348,10 +348,10 @@ async def manage_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             live_status = job.get("status", live_status)
             if job.get("error"):
                 live_status += f" ({job['error'][:80]})"
-        message = f"User: {value}\nOpt-in: {record.get('opted_in', False)}\nEnabled: {record.get('enabled', False)}\nStatus (Personal Account): {live_status}"
+        message = f"User: {value}\nEnabled: {record.get('enabled', True)}\nStatus (Personal Account): {live_status}"
     elif command == "/retry":
-        if not record.get("opted_in") or not record.get("enabled", True):
-            message = "⚠️ User opt-in করেনি অথবা বন্ধ আছে।"
+        if not record.get("enabled", True):
+            message = "⚠️ User বন্ধ (useroff) আছে।"
         else:
             # Feature 1 — personal message এখন Bot Token নয়, user_client
             # (Personal Account) দিয়ে যায়। userbot.py প্রসেসটা queue তুলে
@@ -461,7 +461,10 @@ async def send_campaign(bot):
     delay = max(0, int(campaign.get("delay_minutes", 0)))
     for value in campaign.get("user_ids", []):
         record = settings.get("users", {}).get(str(value), {})
-        if not record.get("opted_in") or not record.get("enabled", True):
+        # Personal Account (user_client) দিয়ে পাঠানো হয় বলে recipient-কে বটে
+        # join/opt-in করার দরকার নেই — শুধু Admin যাকে বন্ধ (🔴 useroff)
+        # করেছেন তাকে বাদ দেওয়া হয়।
+        if not record.get("enabled", True):
             continue
         job_id = personal_messenger.queue_message(record.get("id", value), message, tag="campaign")
         record["status"] = "queued"
@@ -493,7 +496,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "👋 স্বাগতম! এটি একটি প্রাইভেট অটো-পোস্ট/AI বট।\n"
             "শুধুমাত্র Admin এই বট পরিচালনা করতে পারে।\n\n"
-            "Admin আপনাকে opt-in করতে বললে /optin কমান্ড ব্যবহার করুন।")
+            "Admin আপনাকে Personal Account থেকে সরাসরি message পাঠাতে পারেন — "
+            "এর জন্য আপনাকে আলাদা কিছু করতে হবে না। বার্তা পেতে না চাইলে /optout ব্যবহার করুন।")
         return
     await update.message.reply_text(
         "👋 স্বাগতম, Admin!\n\n"
@@ -503,7 +507,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🤖 AI দিয়ে পোস্ট Edit/Formatting (Groq)\n"
         "🛡️ ব্যক্তিগত তথ্য (username/phone/email/link) auto-filter\n"
         "📢 Channel → Group Forward (repeat/schedule সহ)\n"
-        "📩 Opt-in User Messaging (Personal Account থেকে পাঠানো হয়)\n"
+        "📩 ইউজার মেসেজিং (Personal Account থেকে সরাসরি পাঠানো হয়, বটে join লাগে না)\n"
         "👋 Group Welcome + Group/Live AI Chat\n"
         "🚨 কোনো সমস্যা হলে Bot নিজে থেকেই আপনাকে জানাবে\n\n"
         "ব্যবহারের নিয়ম:\n"
@@ -517,15 +521,15 @@ async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Feature 3 — /help: গুরুত্বপূর্ণ Command ও Feature সম্পর্কে সাহায্য।
     if not is_admin(update.effective_user.id):
         await update.message.reply_text(
-            "❓ /optin — Admin-এর message পাওয়ার জন্য opt-in করুন\n"
-            "❓ /optout — Opt-out করুন")
+            "❓ Admin আপনাকে Personal Account থেকে সরাসরি message পাঠাতে পারেন, কোনো opt-in লাগে না।\n"
+            "❓ /optout — আর message না চাইলে বন্ধ করুন")
         return
     await update.message.reply_text(
         "❓ সাহায্য / Command তালিকা\n\n"
         "/start — বটের পরিচয় ও মূল Feature\n"
         "/help — এই সাহায্য বার্তা\n"
         "/status — Bot, Personal Account (user client), AI ইত্যাদির বর্তমান Status\n\n"
-        "User Messaging Command:\n"
+        "ইউজার মেসেজিং Command:\n"
         "/useron <id/username> — নির্দিষ্ট user চালু করুন\n"
         "/useroff <id/username> — নির্দিষ্ট user বন্ধ করুন\n"
         "/userremove <id/username> — User তালিকা থেকে বাদ দিন\n"
@@ -538,7 +542,7 @@ async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "📢 Channel → Group → Forward সেটিংস\n"
         "⚙️ সেটিংস → Delay, Template, মিডিয়া ফিল্টার\n"
         "🎨 AI সেটিংস → Post Format Style → Custom post format\n"
-        + ("👑 Admin Management → Admin যোগ/সরান, Permission সেট\n" if is_super_owner(update.effective_user.id) else ""),
+        + ("👑 অ্যাডমিন ব্যবস্থাপনা → Admin যোগ/সরান, Permission সেট\n" if is_super_owner(update.effective_user.id) else ""),
         reply_markup=main_kb(update.effective_user.id))
 
 
@@ -877,13 +881,15 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             settings.setdefault("users", {}).setdefault(key, {
                 "id": int(key) if key.isdigit() else key,
                 "username": value if value.startswith("@") else "",
-                "opted_in": False,
                 "enabled": True,
-                "status": "waiting for opt-in",
+                "status": "ready",
             })
         save_settings(settings)
         user_state.pop(uid, None)
-        await update.message.reply_text(f"✅ {len(values)} জন user যোগ হয়েছে। শুধু /optin করা user-দের message যাবে।", reply_markup=user_message_kb())
+        await update.message.reply_text(
+            f"✅ {len(values)} জন user যোগ হয়েছে। Personal Account থেকে সরাসরি message যাবে — "
+            "কারো বটে join/opt-in হওয়ার দরকার নেই।",
+            reply_markup=user_message_kb())
         return
 
     if uid in user_state and user_state[uid]["step"] == "await_user_remove":
@@ -1377,13 +1383,13 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Emoji heading: {'চালু' if fs['use_emoji_heading'] else 'বন্ধ'}", reply_markup=format_style_kb())
 
     # ── Feature 9 — Multi Admin System (Super Owner only) ──
-    elif t == "👑 Admin Management":
+    elif t == "👑 অ্যাডমিন ব্যবস্থাপনা":
         if not is_super_owner(uid):
             await update.message.reply_text("❌ শুধুমাত্র Super Owner এই অংশ ব্যবহার করতে পারবেন।", reply_markup=main_kb(uid))
         else:
             admins = settings.get("admins", {})
             await update.message.reply_text(
-                f"👑 Admin Management\n\nমোট Extra Admin: {len(admins)}\n"
+                f"👑 অ্যাডমিন ব্যবস্থাপনা\n\nমোট Extra Admin: {len(admins)}\n"
                 "Super Owner (env-এ সেট, সরানো যায় না) সবসময় Full Access পায়।",
                 reply_markup=admin_kb())
 
@@ -1427,10 +1433,10 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("যার permission পরিবর্তন করবেন, সেই ID পাঠান:\n\n" + "\n".join(rows))
 
     # ── Feature 4 — Multi-Channel Watch + Smart Scheduling ──
-    elif t == "🧭 Multi-Channel Watch":
+    elif t == "🧭 মাল্টি-চ্যানেল ওয়াচ":
         mw = settings.setdefault("multi_watch", {})
         await update.message.reply_text(
-            "🧭 Multi-Channel Watch + Smart Scheduling\n\n"
+            "🧭 মাল্টি-চ্যানেল ওয়াচ + স্মার্ট শিডিউলিং\n\n"
             f"অবস্থা: {'🟢 চালু' if mw.get('enabled') else '🔴 বন্ধ'}\n"
             f"Watch Channel: {len(mw.get('channels', []))}\n"
             f"Schedule Times: {', '.join(mw.get('schedule_times', [])) or '(নেই)'}\n"
@@ -1444,7 +1450,7 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif t in ("🟢 Multi Watch চালু", "🔴 Multi Watch বন্ধ"):
         settings.setdefault("multi_watch", {})["enabled"] = t.startswith("🟢")
         save_settings(settings)
-        await update.message.reply_text("✅ Multi-Channel Watch অবস্থা আপডেট হয়েছে।", reply_markup=multi_watch_kb())
+        await update.message.reply_text("✅ মাল্টি-চ্যানেল ওয়াচ অবস্থা আপডেট হয়েছে।", reply_markup=multi_watch_kb())
 
     elif t in ("➕ Watch Channel যোগ", "➖ Watch Channel বাদ"):
         user_state[uid] = {"step": "await_mw_channel", "action": "add" if "যোগ" in t else "remove"}
@@ -1517,10 +1523,10 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "অথবা সরাসরি একটা .txt ফাইল পাঠান (ফাইলের ভেতরের লেখাটাই নির্দেশনা হিসেবে সেভ হবে)।\n"
             "খালি করতে 'না' লিখুন।")
 
-    elif t == "📩 User Messaging":
+    elif t == "📩 ইউজার মেসেজিং":
         campaign = settings["user_campaign"]
         await update.message.reply_text(
-            f"📩 Opt-in User Messaging\n\n"
+            f"📩 ইউজার মেসেজিং\n\n"
             f"তালিকায় user: {len(campaign['user_ids'])}\n"
             f"Message: {'সেট করা আছে' if campaign['message'] else 'খালি'}\n"
             f"Delay: {campaign['delay_minutes']} মিনিট",
@@ -1533,7 +1539,8 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             live_status = item.get("status", "unknown")
             if item.get("job_id"):
                 live_status = personal_messenger.get_status(item["job_id"]).get("status", live_status)
-            rows.append(f"{key} — {'🟢 opt-in' if item.get('opted_in') else '🔴 opt-in নেই'} — {live_status}")
+            active = "🟢 চালু" if item.get("enabled", True) else "🔴 বন্ধ (useroff)"
+            rows.append(f"{key} — {active} — {live_status}")
         await update.message.reply_text("\n".join(rows) or "User list খালি।", reply_markup=user_message_kb())
 
     elif t == "➕ User যোগ":
