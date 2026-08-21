@@ -1,0 +1,4 @@
+python-telegram-bot>=21
+python-dotenv
+telethon>=1.36
+openpyxl>=3.1
