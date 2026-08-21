@@ -497,7 +497,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "👋 স্বাগতম, Admin!\n\n"
-        "🤖 *এটি আপনার Telegram Auto-Post & AI বট।*\n\n"
+        "🤖 এটি আপনার Telegram Auto-Post & AI বট।\n\n"
         "মূল Feature সমূহ:\n"
         "📡 একাধিক Source Channel মনিটর করে নতুন পোস্ট Auto-Publish\n"
         "🤖 AI দিয়ে পোস্ট Edit/Formatting (Groq)\n"
@@ -510,7 +510,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "১. নিচের মেনু বাটন ব্যবহার করে সব সেটিংস ধাপে ধাপে করুন — কোনো কমান্ড মুখস্থ করতে হবে না।\n"
         "২. দরকারি কমান্ড: /help (সাহায্য), /status (বটের বর্তমান অবস্থা)।\n\n"
         "নিচের বাটন থেকে শুরু করুন।",
-        parse_mode="Markdown",
         reply_markup=main_kb(update.effective_user.id))
 
 
@@ -522,16 +521,16 @@ async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "❓ /optout — Opt-out করুন")
         return
     await update.message.reply_text(
-        "❓ *সাহায্য / Command তালিকা*\n\n"
+        "❓ সাহায্য / Command তালিকা\n\n"
         "/start — বটের পরিচয় ও মূল Feature\n"
         "/help — এই সাহায্য বার্তা\n"
-        "/status — Bot, Personal Account (user_client), AI ইত্যাদির বর্তমান Status\n\n"
+        "/status — Bot, Personal Account (user client), AI ইত্যাদির বর্তমান Status\n\n"
         "User Messaging Command:\n"
-        "/useron `<id/username>` — নির্দিষ্ট user চালু করুন\n"
-        "/useroff `<id/username>` — নির্দিষ্ট user বন্ধ করুন\n"
-        "/userremove `<id/username>` — User তালিকা থেকে বাদ দিন\n"
-        "/userstatus `<id/username>` — User-এর ডেলিভারি status দেখুন\n"
-        "/retry `<id/username>` — আবার message পাঠানোর চেষ্টা করুন\n\n"
+        "/useron <id/username> — নির্দিষ্ট user চালু করুন\n"
+        "/useroff <id/username> — নির্দিষ্ট user বন্ধ করুন\n"
+        "/userremove <id/username> — User তালিকা থেকে বাদ দিন\n"
+        "/userstatus <id/username> — User-এর ডেলিভারি status দেখুন\n"
+        "/retry <id/username> — আবার message পাঠানোর চেষ্টা করুন\n\n"
         "মূল কাজগুলোর জন্য মেনু বাটন ব্যবহার করাই সহজ পথ:\n"
         "📡 চ্যানেল সেটিংস → Source/Destination যোগ\n"
         "🛡️ প্রাইভেসি ফিল্টার → ব্যক্তিগত তথ্য filter\n"
@@ -540,7 +539,6 @@ async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "⚙️ সেটিংস → Delay, Template, মিডিয়া ফিল্টার\n"
         "🎨 AI সেটিংস → Post Format Style → Custom post format\n"
         + ("👑 Admin Management → Admin যোগ/সরান, Permission সেট\n" if is_super_owner(update.effective_user.id) else ""),
-        parse_mode="Markdown",
         reply_markup=main_kb(update.effective_user.id))
 
 
@@ -559,10 +557,10 @@ async def status_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return "🟢 চালু/ঠিক আছে" if ok else "🔴 সমস্যা/বন্ধ"
 
     lines = [
-        "📊 *Bot Status*",
+        "📊 Bot Status",
         "",
         f"🤖 Admin Panel (main.py): {mark(True)}",
-        f"👤 Personal Account (user_client): {mark(userbot_alive and user_client_authorized)}",
+        f"👤 Personal Account (user client): {mark(userbot_alive and user_client_authorized)}",
         f"🔌 Userbot Process: {mark(userbot_alive)}",
         f"🧠 AI Service (Groq): {mark(ai_configured)} — এই বটে {'চালু' if settings.get('ai', {}).get('enabled') else 'বন্ধ'}",
         f"📝 Auto Post: {'🟢 চালু' if settings.get('autopost') else '🔴 বন্ধ'}",
@@ -574,7 +572,7 @@ async def status_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append("\n⚠️ Userbot process থেকে সাড়া পাওয়া যাচ্ছে না — Server/Deployment চেক করুন।")
     elif not user_client_authorized:
         lines.append("\n⚠️ Personal Account-এর Session/Login সমস্যা আছে — আবার login করুন।")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb(update.effective_user.id))
+    await update.message.reply_text("\n".join(lines), reply_markup=main_kb(update.effective_user.id))
 
 async def handle_forward(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     fwd = update.message.forward_from_chat
