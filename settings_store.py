@@ -118,6 +118,10 @@ DEFAULT_SETTINGS = {
         "max_posts_per_slot": 1,
         "similarity_skip": True,
     },
+    # Feature — Scheduled Posts: Admin নিজে Save করা প্রতিটা পোস্ট তার নিজের
+    # নির্ধারিত সময়ে প্রতিদিন Destination Channel-এ পাবলিশ হয়। প্রতিটা এন্ট্রি:
+    # {id, text, media_type, file_id, time: "HH:MM", enabled, last_sent_date}
+    "scheduled_posts": [],
 }
 
 # Feature 9 — permission keys admins can be granted individually.
