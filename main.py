@@ -2,6 +2,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 import json
+import uuid
 from config import DATA_DIR
 
 from telegram import Update, ReplyKeyboardMarkup
@@ -82,7 +83,18 @@ def multi_watch_kb():
         ["📋 Watch Channel তালিকা", "📥 Buffer Status"],
         ["⏰ Schedule Times", "🔢 Max Posts/Slot"],
         ["🔁 Similarity Filter ON/OFF"],
+        ["🗓️ Scheduled Posts"],
         ["⬅️ ফিরে যান"],
+    ], resize_keyboard=True)
+
+
+def scheduled_posts_kb():
+    # Feature — নিজে Save করা পোস্ট প্রতিদিন নির্দিষ্ট সময়ে পাবলিশ হওয়ার মেনু।
+    return ReplyKeyboardMarkup([
+        ["➕ Post যোগ (Save)"],
+        ["📋 Post তালিকা", "🗑️ Post ডিলিট"],
+        ["🔁 Post ON/OFF"],
+        ["⬅️ Multi Watch-এ ফিরুন"],
     ], resize_keyboard=True)
 
 def privacy_kb():
@@ -118,13 +130,22 @@ def media_filter_kb():
 def ai_kb():
     return ReplyKeyboardMarkup([
         ["🟢 AI Editing চালু", "🔴 AI Editing বন্ধ"],
-        ["🎨 AI Style", "🧠 Custom Prompt"],
-        ["📏 Post Length", "✨ AI Emoji ON/OFF"],
+        ["🎨 AI Style", "📏 Post Length"],
+        ["🧠 Custom Prompt", "✨ AI Emoji ON/OFF"],
+        ["🧩 আরও AI অপশন"],
+        ["⬅️ ফিরে যান"],
+    ], resize_keyboard=True)
+
+
+def ai_more_kb():
+    # Feature — কম ব্যবহৃত/অ্যাডভান্সড AI অপশনগুলো এখানে সরিয়ে মূল AI
+    # সেটিংস মেনু ছোট ও পরিষ্কার রাখা হয়েছে।
+    return ReplyKeyboardMarkup([
         ["🎭 AI পরিচয় সেটিংস"],
         ["👥 Group AI সেটিংস", "💬 Live Chat সেটিংস"],
         ["📚 Private Knowledge", "👋 Welcome সেটিংস"],
         ["🔤 Word Filter", "🎨 Post Format Style"],
-        ["⬅️ ফিরে যান"],
+        ["⬅️ AI সেটিংসে ফিরুন"],
     ], resize_keyboard=True)
 
 
@@ -267,6 +288,7 @@ MENU_PERMISSION = {
     "⚙️ সেটিংস": "bot_settings",
     "📩 ইউজার মেসেজিং": "user_account_control",
     "🧭 মাল্টি-চ্যানেল ওয়াচ": "channel_manage",
+    "🗓️ Scheduled Posts": "schedule_manage",
     # "👑 অ্যাডমিন ব্যবস্থাপনা" is intentionally NOT here — it is gated by
     # is_super_owner() directly below, never by a delegable permission.
 }
@@ -578,6 +600,41 @@ async def status_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append("\n⚠️ Personal Account-এর Session/Login সমস্যা আছে — আবার login করুন।")
     await update.message.reply_text("\n".join(lines), reply_markup=main_kb(update.effective_user.id))
 
+async def handle_scheduled_post_capture(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Feature — Scheduled Posts কনটেন্ট ধরার জন্য একটা আলাদা, আগে-চলা
+    handler (group=-1)। শুধু তখনই কিছু করে যখন Admin ঠিক আগে
+    '➕ Post যোগ (Save)' চেপে 'await_scheduled_post_content' state-এ আছে —
+    নাহলে চুপচাপ কিছু না করে ফিরে যায়, যাতে normal handler (forward/
+    document/text) স্বাভাবিকভাবে কাজ করতে পারে।"""
+    uid = update.effective_user.id
+    if not is_admin(uid) or user_state.get(uid, {}).get("step") != "await_scheduled_post_content":
+        return
+    message = update.message
+    text = message.caption or message.text or ""
+    media_type, file_id = None, None
+    if message.photo:
+        media_type, file_id = "photo", message.photo[-1].file_id
+    elif message.video:
+        media_type, file_id = "video", message.video.file_id
+    elif message.document:
+        media_type, file_id = "document", message.document.file_id
+    elif message.animation:
+        media_type, file_id = "animation", message.animation.file_id
+    elif message.audio:
+        media_type, file_id = "audio", message.audio.file_id
+    elif message.voice:
+        media_type, file_id = "voice", message.voice.file_id
+    if not text and not file_id:
+        await message.reply_text("⚠️ কোনো টেক্সট/মিডিয়া পাওয়া যায়নি, আবার পাঠান।")
+        return
+    user_state[uid] = {
+        "step": "await_scheduled_post_time",
+        "draft": {"text": text, "media_type": media_type, "file_id": file_id},
+    }
+    await message.reply_text(
+        "🕒 এই Post প্রতিদিন কোন সময়ে পাঠাতে চান? 24-ঘণ্টা ফরম্যাটে লিখুন, যেমন: 20:30")
+
+
 async def handle_forward(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     fwd = update.message.forward_from_chat
     state = user_state.get(update.effective_user.id, {})
@@ -630,6 +687,8 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # so a stray button press never gets swallowed as text input for a pending
 # state (see the fix note inside handle()).
 ALL_MENU_BUTTONS = {
+    "🧩 আরও AI অপশন", "🗓️ Scheduled Posts", "➕ Post যোগ (Save)", "📋 Post তালিকা",
+    "🗑️ Post ডিলিট", "🔁 Post ON/OFF", "⬅️ Multi Watch-এ ফিরুন",
     "⏰ Schedule", "⏰ Schedule Times", "⏱️ Delay", "⏱️ ডিলে সেট", "⏸️ Pause", "▶️ Resume",
     "⚙️ Forward Settings", "⚙️ সেটিংস", "✉️ ইমেইল", "✏️ Welcome বার্তা", "✨ AI Emoji ON/OFF",
     "❓ সাহায্য", "➕ Admin যোগ", "➕ Destination যোগ", "➕ Filter যোগ", "➕ Group যোগ করুন",
@@ -658,6 +717,24 @@ ALL_MENU_BUTTONS = {
 
 
 async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """সব মেনু/টেক্সট হ্যান্ডলিং আসলে _handle_impl-এ হয়। এই wrapper শুধু একটা
+    নিরাপত্তা-জাল — কোনো একটা মেনুতে কোনো কারণে কোড এরর হলেও Bot যেন পুরোপুরি
+    চুপ/অকেজো হয়ে না যায়, বরং মূল মেনু দেখিয়ে দেয়।"""
+    try:
+        await _handle_impl(update, ctx)
+    except Exception as error:
+        uid = update.effective_user.id if update.effective_user else None
+        user_state.pop(uid, None)
+        print(f"🔥 handle() crashed on {update.message.text!r}: {error}")
+        try:
+            await update.message.reply_text(
+                "⚠️ একটা সাময়িক সমস্যা হয়েছে, মূল মেনুতে ফিরিয়ে দিলাম। আবার চেষ্টা করুন।",
+                reply_markup=main_kb(uid))
+        except Exception as reply_error:
+            print(f"🔥 error reply-ও ব্যর্থ হয়েছে: {reply_error}")
+
+
+async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     t = update.message.text
     uid = update.effective_user.id
     if not is_admin(uid):
@@ -867,6 +944,62 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         save_settings(settings)
         user_state.pop(uid, None)
         await update.message.reply_text(f"✅ Max Posts/Slot সেট হয়েছে: {t.strip()}", reply_markup=multi_watch_kb())
+        return
+
+    # ── Feature — Scheduled Posts text inputs ──
+    if uid in user_state and user_state[uid]["step"] == "await_scheduled_post_time":
+        raw = t.strip()
+        try:
+            hh, mm = raw.split(":")
+            hh, mm = int(hh), int(mm)
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                raise ValueError
+            time_str = f"{hh:02d}:{mm:02d}"
+        except (ValueError, IndexError):
+            await update.message.reply_text("⚠️ সঠিক ফরম্যাটে সময় দিন, যেমন: 09:00 বা 20:30")
+            return
+        draft = user_state[uid].get("draft", {})
+        post_id = uuid.uuid4().hex[:8]
+        settings.setdefault("scheduled_posts", []).append({
+            "id": post_id,
+            "text": draft.get("text", ""),
+            "media_type": draft.get("media_type"),
+            "file_id": draft.get("file_id"),
+            "time": time_str,
+            "enabled": True,
+            "last_sent_date": None,
+        })
+        save_settings(settings)
+        user_state.pop(uid, None)
+        await update.message.reply_text(
+            f"✅ Post সেভ হয়েছে (ID: {post_id})। প্রতিদিন {time_str}-এ সব Destination Channel-এ পাবলিশ হবে।",
+            reply_markup=scheduled_posts_kb())
+        return
+
+    if uid in user_state and user_state[uid]["step"] == "await_scheduled_post_delete":
+        target = t.strip()
+        posts = settings.get("scheduled_posts", [])
+        new_posts = [p for p in posts if p["id"] != target]
+        if len(new_posts) == len(posts):
+            await update.message.reply_text("⚠️ এই ID পাওয়া যায়নি। আবার চেষ্টা করুন।")
+            return
+        settings["scheduled_posts"] = new_posts
+        save_settings(settings)
+        user_state.pop(uid, None)
+        await update.message.reply_text("✅ Post ডিলিট হয়েছে।", reply_markup=scheduled_posts_kb())
+        return
+
+    if uid in user_state and user_state[uid]["step"] == "await_scheduled_post_toggle":
+        target = t.strip()
+        match = next((p for p in settings.get("scheduled_posts", []) if p["id"] == target), None)
+        if not match:
+            await update.message.reply_text("⚠️ এই ID পাওয়া যায়নি। আবার চেষ্টা করুন।")
+            return
+        match["enabled"] = not match.get("enabled", True)
+        save_settings(settings)
+        user_state.pop(uid, None)
+        await update.message.reply_text(
+            f"✅ {target}: {'🟢 চালু' if match['enabled'] else '🔴 বন্ধ'}", reply_markup=scheduled_posts_kb())
         return
 
     if uid in user_state and user_state[uid]["step"] == "await_live_chat_field":
@@ -1283,6 +1416,18 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"Custom prompt: {ai['custom_prompt'] or '(খালি)'}",
             reply_markup=ai_kb())
 
+    elif t == "🧩 আরও AI অপশন":
+        await update.message.reply_text(
+            "🧩 আরও AI অপশন\n\n"
+            "🎭 AI পরিচয় — AI-র নাম/Owner-এর নাম\n"
+            "👥 Group AI — নির্দিষ্ট Group-এ আলাদা AI সেটিং\n"
+            "💬 Live Chat — User-দের সাথে AI চ্যাট\n"
+            "📚 Private Knowledge — Price/Contact/Rules ইত্যাদি\n"
+            "👋 Welcome — নতুন Member-কে স্বাগত বার্তা\n"
+            "🔤 Word Filter — নির্দিষ্ট শব্দ বদলে দিন\n"
+            "🎨 Post Format Style — Post-এর সাজসজ্জা",
+            reply_markup=ai_more_kb())
+
     elif t in ("🟢 AI Editing চালু", "🔴 AI Editing বন্ধ"):
         settings["ai"]["enabled"] = t.startswith("🟢")
         save_settings(settings)
@@ -1531,6 +1676,55 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ Duplicate Filter: {'চালু' if mw['similarity_skip'] else 'বন্ধ'}", reply_markup=multi_watch_kb())
 
+    # ── Feature — Scheduled Posts (নিজে Save করা পোস্ট প্রতিদিন নির্দিষ্ট সময়ে) ──
+    elif t == "🗓️ Scheduled Posts":
+        posts = settings.get("scheduled_posts", [])
+        await update.message.reply_text(
+            "🗓️ Scheduled Posts\n\n"
+            f"মোট Save করা Post: {len(posts)}\n\n"
+            "যেকোনো Post Save করলে সেটার জন্য একটা নির্দিষ্ট সময় (HH:MM) সেট করবেন। "
+            "একবার সেট করা থাকলে প্রতিদিন সেই সময়ে এই Post-টা আপনার সব Destination "
+            "Channel-এ আবার পাবলিশ হবে — যতক্ষণ না আপনি সেটা বন্ধ/ডিলিট করছেন।",
+            reply_markup=scheduled_posts_kb())
+
+    elif t == "➕ Post যোগ (Save)":
+        user_state[uid] = {"step": "await_scheduled_post_content"}
+        await update.message.reply_text(
+            "যে Post-টা Save করতে চান, সেটা Forward করুন — অথবা টেক্সট/ছবি/ভিডিও/ফাইল সরাসরি পাঠান।")
+
+    elif t == "📋 Post তালিকা":
+        posts = settings.get("scheduled_posts", [])
+        if not posts:
+            await update.message.reply_text("তালিকা খালি।", reply_markup=scheduled_posts_kb())
+        else:
+            lines = []
+            for post in posts:
+                preview = (post.get("text") or "").strip()[:30] or f"[{post.get('media_type') or 'media'}]"
+                status = "🟢" if post.get("enabled", True) else "🔴"
+                lines.append(f"{status} {post['id']} — {post['time']} — {preview}")
+            await update.message.reply_text("\n".join(lines), reply_markup=scheduled_posts_kb())
+
+    elif t == "🗑️ Post ডিলিট":
+        posts = settings.get("scheduled_posts", [])
+        if not posts:
+            await update.message.reply_text("তালিকা খালি।", reply_markup=scheduled_posts_kb())
+        else:
+            user_state[uid] = {"step": "await_scheduled_post_delete"}
+            rows = [f"{p['id']} — {p['time']}" for p in posts]
+            await update.message.reply_text("যে Post-এর ID ডিলিট করতে চান, সেটা পাঠান:\n\n" + "\n".join(rows))
+
+    elif t == "🔁 Post ON/OFF":
+        posts = settings.get("scheduled_posts", [])
+        if not posts:
+            await update.message.reply_text("তালিকা খালি।", reply_markup=scheduled_posts_kb())
+        else:
+            user_state[uid] = {"step": "await_scheduled_post_toggle"}
+            rows = [f"{p['id']} — {p['time']} — {'🟢' if p.get('enabled', True) else '🔴'}" for p in posts]
+            await update.message.reply_text("যে Post চালু/বন্ধ করতে চান, তার ID পাঠান:\n\n" + "\n".join(rows))
+
+    elif t == "⬅️ Multi Watch-এ ফিরুন":
+        await update.message.reply_text("🧭 Multi-Channel Watch-এ ফিরে গেলাম।", reply_markup=multi_watch_kb())
+
     elif t in ("🎭 AI পরিচয় সেটিংস", "⬅️ AI সেটিংসে ফিরুন"):
         if t == "⬅️ AI সেটিংসে ফিরুন":
             await update.message.reply_text("🤖 AI সেটিংসে ফিরে গেলাম।", reply_markup=ai_kb())
@@ -1755,8 +1949,25 @@ async def handle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ চিনতে পারিনি। নিচের বাটন ব্যবহার করুন。", reply_markup=main_kb(uid))
 
+async def global_error_handler(update, context):
+    """সমস্ত হ্যান্ডলারের জন্য শেষ safety net — কোনো বাটনে চাপলে কোনো কারণে
+    কোড এরর হলেও Bot যেন 'কোনো response নেই' অবস্থায় আটকে না থেকে অন্তত একটা
+    বার্তা দেয় এবং মূল মেনু ফিরিয়ে দেয়, আর error console-এ লগ হয়ে থাকে যাতে
+    পরে খুঁজে বের করা যায়।"""
+    print(f"🔥 Unhandled error: {context.error}")
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            uid = update.effective_user.id if update.effective_user else None
+            await update.effective_message.reply_text(
+                "⚠️ একটা সাময়িক সমস্যা হয়েছে, আবার চেষ্টা করুন। সমস্যা থাকলে /start লিখে আবার শুরু করুন।",
+                reply_markup=main_kb(uid))
+    except Exception as notify_error:
+        print(f"🔥 error handler নিজেই ব্যর্থ হয়েছে: {notify_error}")
+
+
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    app.add_error_handler(global_error_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
@@ -1764,6 +1975,9 @@ def main():
     app.add_handler(CommandHandler("optout", optout))
     for command in ("useron", "useroff", "userremove", "userstatus", "retry"):
         app.add_handler(CommandHandler(command, manage_user))
+    # Feature — Scheduled Posts content capture. group=-1 রানে সবার আগে, কিন্তু
+    # নিজে কিছু না করলে (state না মিললে) স্বাভাবিক group 0 হ্যান্ডলারগুলো ঠিকই চলে।
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, handle_scheduled_post_capture), group=-1)
     app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forward))
     app.add_handler(MessageHandler(filters.Document.ALL & filters.ChatType.PRIVATE, handle_document))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_members))
