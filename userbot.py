@@ -459,6 +459,68 @@ async def on_multi_watch_source(event):
     multi_watch.add_candidate(event.chat_id, event.id, raw_text, bool(message.media))
 
 
+async def scheduled_posts_worker():
+    """Feature — Scheduled Posts: Admin-এর নিজে Save করা প্রতিটা Post তার
+    নিজস্ব নির্ধারিত সময়ে (HH:MM) প্রতিদিন সব Destination Channel-এ পাবলিশ
+    হয়। একবার Save করা থাকলে প্রতিদিন সেই সময়ে আবার চলতে থাকে, যতক্ষণ না
+    Admin সেটা বন্ধ (🔁 Post ON/OFF) বা ডিলিট করছেন। Bot API-এর file_id
+    ব্যবহার করা হয় বলে Personal Account-এর কোনো membership লাগে না — শুধু
+    Bot নিজে Destination Channel-এ Admin/পোস্ট করার অনুমতি থাকলেই যথেষ্ট।"""
+    while True:
+        await asyncio.sleep(20)
+        try:
+            settings = load_settings()
+            posts = settings.get("scheduled_posts", [])
+            if not posts:
+                continue
+            now = datetime.now()
+            current_time = now.strftime("%H:%M")
+            today = now.strftime("%Y-%m-%d")
+            destinations = settings.get("destinations", [])
+            changed = False
+            for post in posts:
+                if not post.get("enabled", True):
+                    continue
+                if post.get("time") != current_time:
+                    continue
+                if post.get("last_sent_date") == today:
+                    continue
+                if not destinations:
+                    continue
+                text = post.get("text") or ""
+                media_type = post.get("media_type")
+                file_id = post.get("file_id")
+                for destination in destinations:
+                    try:
+                        if media_type == "photo":
+                            await bot_app.bot.send_photo(destination, file_id, caption=text or None)
+                        elif media_type == "video":
+                            await bot_app.bot.send_video(destination, file_id, caption=text or None)
+                        elif media_type == "document":
+                            await bot_app.bot.send_document(destination, file_id, caption=text or None)
+                        elif media_type == "animation":
+                            await bot_app.bot.send_animation(destination, file_id, caption=text or None)
+                        elif media_type == "audio":
+                            await bot_app.bot.send_audio(destination, file_id, caption=text or None)
+                        elif media_type == "voice":
+                            await bot_app.bot.send_voice(destination, file_id, caption=text or None)
+                        elif text:
+                            await bot_app.bot.send_message(destination, text)
+                        else:
+                            continue
+                        log_post("published")
+                    except Exception as error:
+                        print(f"⚠️ Scheduled post publish failed for {destination}: {error}")
+                        await notify_publish_failed(bot_app.bot, destination, error)
+                post["last_sent_date"] = today
+                changed = True
+            if changed:
+                save_settings(settings)
+        except Exception as error:
+            print(f"⚠️ Scheduled posts worker error: {error}")
+            await notify_access_issue(bot_app.bot, "scheduled_posts", error)
+
+
 async def multi_watch_publish_worker():
     """Feature 4 — checks every 20s whether a configured schedule slot
     (e.g. 09:00 / 14:00 / 19:00) is due, and if so publishes the
@@ -600,6 +662,7 @@ async def main():
     asyncio.create_task(personal_message_worker())
     asyncio.create_task(heartbeat_worker())
     asyncio.create_task(multi_watch_publish_worker())
+    asyncio.create_task(scheduled_posts_worker())
     await user_client.run_until_disconnected()
 
 
