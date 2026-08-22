@@ -6,6 +6,7 @@ stored in settings.json or written to logs.
 import asyncio
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -18,6 +19,38 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # deployments don't silently break. Keep in sync with settings_store's
 # DEPRECATED_MODEL_MIGRATIONS default target.
 FALLBACK_MODEL = "openai/gpt-oss-120b"
+
+
+NO_MARKDOWN_RULE = (
+    "কখনো Markdown/formatting syntax লিখবেন না — যেমন **bold**, *italic*, "
+    "__underline__, `code`, # heading, অথবা সাজানোর জন্য শুধু ***/---/___ এর "
+    "মতো আলাদা লাইন। সবকিছু প্লেইন টেক্সট হিসেবে লিখুন — জোর দিতে emoji বা "
+    "নতুন লাইন ব্যবহার করুন, কিন্তু তারকা(*), আন্ডারস্কোর(_), ব্যাকটিক(`) "
+    "কখনো ব্যবহার করবেন না, কারণ এগুলো Telegram-এ ঠিকমতো ফরম্যাট হয় না, "
+    "হুবহু চিহ্ন হিসেবে দেখা যায় এবং দেখতে খারাপ লাগে।"
+)
+
+
+def _strip_markdown_artifacts(text: str) -> str:
+    """Safety net — বট parse_mode ছাড়াই মেসেজ পাঠায় (Markdown parsing crash
+    এড়াতে), তাই AI যদি নির্দেশ উপেক্ষা করে ভুলে **bold**/*** এর মতো markdown
+    লিখে ফেলে, সেটা Group/Channel-এ literal তারকা চিহ্ন হিসেবে দেখা যায় —
+    দেখতে খারাপ লাগে। তাই ফেরত পাওয়া টেক্সট থেকে এসব চিহ্ন পরিষ্কার করে
+    দেওয়া হয়।"""
+    if not text:
+        return text
+    # ***, ---, ___ এর মতো পুরো লাইন জোড়া decorator বাদ
+    text = re.sub(r"(?m)^[ \t]*[*_-]{3,}[ \t]*$\n?", "", text)
+    # **bold** / __bold__ -> ভেতরের লেখা রেখে চিহ্ন সরানো
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    # একক */_ emphasis -> ভেতরের লেখা রেখে চিহ্ন সরানো
+    text = re.sub(r"(?<!\*)\*(?!\*)([^\n*]+?)\*(?!\*)", r"\1", text)
+    text = re.sub(r"(?<!_)_(?!_)([^\n_]+?)_(?!_)", r"\1", text)
+    # বাকি বিক্ষিপ্ত তারকা/ব্যাকটিক ঝেড়ে ফেলা
+    text = re.sub(r"`+", "", text)
+    text = re.sub(r"\*{2,}", "", text)
+    return text.strip()
 
 
 def _request(payload: dict, api_key: str) -> str:
@@ -174,12 +207,14 @@ async def edit_post_with_ai(text: str, settings: dict) -> str:
         "শুধুমাত্র নিচে দেওয়া 'অনুমোদিত তথ্য' থেকেই owner-এর নির্ধারিত তথ্য (যেমন price/contact) যোগ করবেন, "
         "নিজে থেকে কোনো নতুন তথ্য/দাম/প্রতিশ্রুতি বানাবেন না। "
         f"Style: {style}. Length: {length}. {emoji}. Custom instruction: {custom}. "
+        f"{NO_MARKDOWN_RULE} "
         "শুধু সম্পাদিত পোস্টটি ফেরত দিন, কোনো ব্যাখ্যা নয়।"
         f"{_knowledge_block(ai)}"
         f"{_format_style_block(settings)}"
         f"{_master_block(ai)}"
     )
-    return await ask_groq(f"এই পোস্টটি সম্পাদনা করুন:\n\n{text}", system=system, model=ai.get("model", "openai/gpt-oss-120b"))
+    result = await ask_groq(f"এই পোস্টটি সম্পাদনা করুন:\n\n{text}", system=system, model=ai.get("model", "openai/gpt-oss-120b"))
+    return _strip_markdown_artifacts(result)
 
 
 async def answer_group_message(text: str, settings: dict, context: str = "") -> str:
@@ -192,8 +227,10 @@ async def answer_group_message(text: str, settings: dict, context: str = "") -> 
         "আপনি Telegram group-এর AI assistant। ব্যবহারকারী যে ভাষায় লিখেছে সেই ভাষাতেই উত্তর দিন। "
         "নিশ্চিত না হলে বানিয়ে বলবেন না; সংক্ষেপে জানাবেন। "
         f"Style: {style}. Answer length: {length}. Custom instruction: {custom}. "
+        f"{NO_MARKDOWN_RULE} "
         f"{identity}"
         f"{_knowledge_block(settings)}"
         f"{_master_block(settings)}"
     )
-    return await ask_groq(f"ব্যবহারকারীর message:\n{text}{context_text}", system=system)
+    result = await ask_groq(f"ব্যবহারকারীর message:\n{text}{context_text}", system=system)
+    return _strip_markdown_artifacts(result)
