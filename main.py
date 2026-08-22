@@ -686,6 +686,17 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # Bug fix — every literal menu-button text in the bot, used by handle() below
 # so a stray button press never gets swallowed as text input for a pending
 # state (see the fix note inside handle()).
+def _truncate(text, limit: int = 300) -> str:
+    """Bug fix — কোনো Setting (যেমন Custom Prompt) খুব বড় হয়ে গেলে সেটা
+    স্ট্যাটাস মেসেজে হুবহু দেখাতে গিয়ে Telegram-এর ৪০৯৬ ক্যারেক্টার লিমিট
+    পার হয়ে 'Message is too long' error দিয়ে পুরো মেনুই ভেঙে যাচ্ছিল। এখন
+    স্ট্যাটাস মেসেজে শুধু শুরুর অংশ দেখানো হয়, পুরোটা নয়।"""
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
 ALL_MENU_BUTTONS = {
     "🧩 আরও AI অপশন", "🗓️ Scheduled Posts", "➕ Post যোগ (Save)", "📋 Post তালিকা",
     "🗑️ Post ডিলিট", "🔁 Post ON/OFF", "⬅️ Multi Watch-এ ফিরুন",
@@ -780,7 +791,8 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if uid in user_state and user_state[uid]["step"] in ("await_ai_style", "await_ai_prompt", "await_ai_length"):
         field = {"await_ai_style": "style", "await_ai_prompt": "custom_prompt", "await_ai_length": "length"}[user_state[uid]["step"]]
-        settings["ai"][field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()
+        cap = 2000 if field == "custom_prompt" else 300
+        settings["ai"][field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()[:cap]
         save_settings(settings)
         user_state.pop(uid, None)
         await update.message.reply_text("✅ AI সেটিংস সেভ হয়েছে।", reply_markup=ai_kb())
@@ -792,7 +804,7 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "await_ai_owner_name": "owner_name",
             "await_ai_identity_filter": "identity_filter",
         }[user_state[uid]["step"]]
-        settings["ai"][field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()
+        settings["ai"][field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()[:300]
         save_settings(settings)
         user_state.pop(uid, None)
         await update.message.reply_text("✅ AI পরিচয় সেটিংস সেভ হয়েছে।", reply_markup=ai_identity_kb())
@@ -1004,8 +1016,9 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if uid in user_state and user_state[uid]["step"] == "await_live_chat_field":
         field = user_state[uid]["field"]
+        cap = 2000 if field == "custom_prompt" else 300
         lc = settings.setdefault("live_chat", {})
-        lc[field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()
+        lc[field] = "" if t.strip() in ("না", "-", "খালি") else t.strip()[:cap]
         save_settings(settings)
         user_state.pop(uid, None)
         await update.message.reply_text("✅ Live Chat সেটিংস সেভ হয়েছে।", reply_markup=live_chat_kb())
@@ -1013,7 +1026,7 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if uid in user_state and user_state[uid]["step"] == "await_welcome_message":
         welcome = settings.setdefault("welcome", {})
-        welcome["message"] = "" if t.strip() in ("না", "-", "খালি") else t.strip()
+        welcome["message"] = "" if t.strip() in ("না", "-", "খালি") else t.strip()[:2000]
         save_settings(settings)
         user_state.pop(uid, None)
         await update.message.reply_text("✅ Welcome বার্তা সেভ হয়েছে।", reply_markup=welcome_kb())
@@ -1411,9 +1424,9 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"🤖 GROQ AI Post Editing\n\n"
             f"অবস্থা: {'🟢 চালু' if ai['enabled'] else '🔴 বন্ধ'}\n"
-            f"Style: {ai['style']}\nLength: {ai['length']}\n"
+            f"Style: {_truncate(ai['style'], 150)}\nLength: {_truncate(ai['length'], 150)}\n"
             f"Emoji: {'চালু' if ai['emoji'] else 'বন্ধ'}\n"
-            f"Custom prompt: {ai['custom_prompt'] or '(খালি)'}",
+            f"Custom prompt: {_truncate(ai['custom_prompt'], 300) or '(খালি)'}",
             reply_markup=ai_kb())
 
     elif t == "🧩 আরও AI অপশন":
@@ -1455,9 +1468,9 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"💬 Live AI Chat (private DM)\n\n"
             f"অবস্থা: {'🟢 চালু' if live.get('enabled') else '🔴 বন্ধ'}\n"
-            f"Style: {live.get('style') or '(default)'}\n"
+            f"Style: {_truncate(live.get('style'), 150) or '(default)'}\n"
             f"Context (আগের কথা মনে রাখা): {'🟢 ON' if live.get('context_enabled', True) else '🔴 OFF'}\n"
-            f"Custom prompt: {live.get('custom_prompt') or '(খালি)'}\n\n"
+            f"Custom prompt: {_truncate(live.get('custom_prompt'), 300) or '(খালি)'}\n\n"
             f"চালু থাকলে সাধারণ user private message পাঠালে AI সরাসরি উত্তর দেবে।",
             reply_markup=live_chat_kb())
 
@@ -1492,7 +1505,7 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"👋 Welcome System (Group-এ নতুন member Join)\n\n"
             f"অবস্থা: {'🟢 চালু' if welcome.get('enabled') else '🔴 বন্ধ'}\n"
-            f"বার্তা: {welcome.get('message') or '(default)'}\n\n"
+            f"বার্তা: {_truncate(welcome.get('message'), 300) or '(default)'}\n\n"
             f"{{name}} লিখলে নতুন member-এর নাম বসবে।",
             reply_markup=welcome_kb())
 
@@ -1736,7 +1749,7 @@ async def _handle_impl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"🎭 AI পরিচয় সেটিংস\n\n"
                 f"AI-র নাম: {ai.get('identity_name') or '(সেট করা নেই — default AI পরিচয় দেবে)'}\n"
                 f"Owner-এর নাম: {ai.get('owner_name') or '(সেট করা নেই — মালিকের প্রশ্ন এড়িয়ে যাবে)'}\n"
-                f"Filter/নিষেধ: {ai.get('identity_filter') or '(খালি)'}\n"
+                f"Filter/নিষেধ: {_truncate(ai.get('identity_filter'), 300) or '(খালি)'}\n"
                 f"Master নির্দেশনা: {master_preview}\n\n"
                 f"এই সেটিংস অনুযায়ী AI কখনো ChatGPT/OpenAI/Groq-এর নাম বলবে না, "
                 f"বরং আপনার দেওয়া পরিচয়/মালিক-এর নাম বলবে এবং Master নির্দেশনা সবসময় মেনে চলবে।",
